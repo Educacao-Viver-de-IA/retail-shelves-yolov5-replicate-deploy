@@ -5,9 +5,9 @@ build:
   python_packages:
     - "torch==2.6.0"
     - "torchvision==0.21.0"
-    - "yolov5==7.0.13"
-    # yolov5 7.0.13 importa huggingface_hub.utils._errors — só existe até 0.25.x
-    - "huggingface_hub==0.25.2"
+    # yolov5 lib removida — usamos torch.load direto + torchvision NMS (mais simples)
+    - "huggingface_hub>=0.24.0"
+    - "ultralytics>=8.2.0"  # pra YOLOv5 model class compat na desserialização do .pt
     - "pillow>=10.0.0"
     - "numpy>=1.26.0"
     - "opencv-python-headless>=4.8.0"
