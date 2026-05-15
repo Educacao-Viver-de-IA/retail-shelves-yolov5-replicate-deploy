@@ -3,11 +3,26 @@ import json
 import os
 import sys
 import time
+import types
 
 os.environ.setdefault("YOLO_CONFIG_DIR", "/tmp/yolo")
 
 print(f"[module] predict.py loading at t={time.time()}", flush=True)
 sys.stdout.flush()
+
+# Monkey-patch huggingface_hub.utils._errors (removido em hf>=0.27 mas yolov5 lib espera)
+import huggingface_hub.utils
+if not hasattr(huggingface_hub.utils, '_errors'):
+    import huggingface_hub.errors as _hf_errors
+    _shim = types.ModuleType('huggingface_hub.utils._errors')
+    # Cria attrs com classes reais de huggingface_hub.errors
+    for name in dir(_hf_errors):
+        if not name.startswith('_'):
+            setattr(_shim, name, getattr(_hf_errors, name))
+    sys.modules['huggingface_hub.utils._errors'] = _shim
+    huggingface_hub.utils._errors = _shim
+    print(f"[module] monkey-patched huggingface_hub.utils._errors", flush=True)
+
 import torch
 print(f"[module] torch {torch.__version__} cuda={torch.cuda.is_available()}", flush=True)
 sys.stdout.flush()
@@ -35,11 +50,14 @@ class Predictor(BasePredictor):
             print(f"[setup] dir err: {e}", flush=True)
 
         try:
-            # ultralytics 8.x carrega yolov5 .pt nativamente — converte internamente
-            from ultralytics import YOLO
-            print(f"[setup] ultralytics imported, loading {WEIGHTS}", flush=True)
+            import yolov5
+            print(f"[setup] yolov5 imported (with hf monkey-patch)", flush=True)
             sys.stdout.flush()
-            self.model = YOLO(WEIGHTS, task="detect")
+            self.model = yolov5.load(WEIGHTS)
+            if torch.cuda.is_available():
+                self.model.cuda()
+            self.model.conf = 0.25
+            self.model.iou = 0.45
             self.names = getattr(self.model, 'names', {}) or {}
             print(f"[setup] DONE (t={time.time()-t0:.1f}s) | classes={self.names}", flush=True)
             sys.stdout.flush()
@@ -61,40 +79,32 @@ class Predictor(BasePredictor):
             return {"error": f"Modelo não carregou: {getattr(self, 'setup_error', '?')}"}
 
         t0 = time.time()
-        # ultralytics rejeita tempfile sem extensão — passa via ndarray
+        # yolov5 lib aceita PIL diretamente
         pil = Image.open(str(image)).convert("RGB")
-        arr = np.array(pil)
 
-        results = self.model.predict(
-            source=arr,
-            conf=conf_threshold,
-            iou=iou_threshold,
-            imgsz=image_size,
-            device="cuda" if torch.cuda.is_available() else "cpu",
-            verbose=False,
-        )
+        self.model.conf = conf_threshold
+        self.model.iou = iou_threshold
 
-        r = results[0] if results else None
-        if r is None or r.boxes is None or len(r.boxes) == 0:
+        results = self.model(pil, size=image_size)
+        preds = results.pred[0]  # [N, 6] x1,y1,x2,y2,conf,cls
+        if preds is None or len(preds) == 0:
             return {
                 "n_detections": 0, "detections": [],
                 "class_counts": {}, "image_size": image_size,
                 "predict_time_s": round(time.time() - t0, 3),
             }
-
-        boxes = r.boxes.xyxy.cpu().numpy()
-        scores = r.boxes.conf.cpu().numpy()
-        classes = r.boxes.cls.cpu().numpy().astype(int)
-        names = r.names
+        boxes = preds[:, :4].cpu().numpy()
+        scores = preds[:, 4].cpu().numpy()
+        classes = preds[:, 5].cpu().numpy().astype(int)
+        names = self.names
 
         detections = []
         for b, s, c in zip(boxes, scores, classes):
+            label = names.get(int(c), f"class_{int(c)}") if isinstance(names, dict) else (names[int(c)] if int(c) < len(names) else f"class_{int(c)}")
             detections.append({
                 "xmin": float(b[0]), "ymin": float(b[1]),
                 "xmax": float(b[2]), "ymax": float(b[3]),
-                "class_id": int(c),
-                "label": names.get(int(c), f"class_{int(c)}"),
-                "score": float(s),
+                "class_id": int(c), "label": label, "score": float(s),
             })
         detections.sort(key=lambda d: -d["score"])
 

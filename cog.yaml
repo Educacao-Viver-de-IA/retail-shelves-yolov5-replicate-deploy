@@ -5,9 +5,9 @@ build:
   python_packages:
     - "torch==2.6.0"
     - "torchvision==0.21.0"
-    # yolov5 lib removida — usamos torch.load direto + torchvision NMS (mais simples)
-    - "huggingface_hub>=0.24.0"
-    - "ultralytics>=8.2.0"  # pra YOLOv5 model class compat na desserialização do .pt
+    # yolov5 lib + monkey-patch hf._errors no predict.py (resolve incompat com hf>=0.27)
+    - "yolov5==7.0.13"
+    - "huggingface_hub>=0.27.0"
     - "pillow>=10.0.0"
     - "numpy>=1.26.0"
     - "opencv-python-headless>=4.8.0"
