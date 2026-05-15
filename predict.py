@@ -25,6 +25,15 @@ if not hasattr(huggingface_hub.utils, '_errors'):
 
 import torch
 print(f"[module] torch {torch.__version__} cuda={torch.cuda.is_available()}", flush=True)
+
+# Monkey-patch torch.load — yolov5 lib não passa weights_only=False
+# torch 2.6+ default mudou pra True. Trust este checkpoint (do HF Hub Jonathancasjar)
+_orig_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    kwargs.setdefault('weights_only', False)
+    return _orig_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+print(f"[module] monkey-patched torch.load(weights_only=False default)", flush=True)
 sys.stdout.flush()
 import numpy as np
 from PIL import Image
